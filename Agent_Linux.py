@@ -6,7 +6,7 @@ Configure the variables below, then deploy to Linux endpoints.
 The PSK and CertThumbprint are printed by the server on startup.
 
 Run with:
-    python3 agent.py
+    python3 Agent_Linux.py
     # Or as a service/background process
 """
 
