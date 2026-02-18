@@ -243,4 +243,4 @@ This is a hardened version with 9 critical bugs and 7 security vulnerabilities f
 
 ## License
 
-Educational/research purposes. Use responsibly and only on systems you own or have explicit authorization to access.
+GNU General Public License v3.0 / Use responsibly and only on systems you own or have explicit authorization to access.
