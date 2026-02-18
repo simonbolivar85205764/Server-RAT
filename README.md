@@ -1,4 +1,4 @@
-# Secure Remote Administration Tool — Multi-OS
+# SAS-RAT Secure Remote Administration Tool — Multi-OS
 
 Production-grade RAT with TLS encryption, HMAC authentication, and support for both Windows and Linux endpoints.
 
